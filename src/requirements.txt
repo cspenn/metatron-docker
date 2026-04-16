@@ -1,5 +1,5 @@
 anyio==4.13.0
-beautifulsoup4==4.14.3
+beautifulsoup4==4.14.2
 certifi==2026.2.25
 charset-normalizer==3.4.6
 click==8.3.1
@@ -20,5 +20,65 @@ reportlab==4.4.10
 requests==2.33.1
 rich==14.3.3
 soupsieve==2.8.3
-typing_extensions==4.15.0
+typing_extensions>=4.13.2,<4.15
 urllib3==2.6.3
+
+# -- Phase 1 additions ---------------------------------------------------------
+
+# TLS/SSL (Python library -- importable directly, no subprocess)
+sslyze>=5.2.0
+
+# WAF detection (run first on every web target)
+wafw00f>=2.2.0
+
+# DNS operations (Python-native, more reliable than dig subprocess)
+dnspython>=2.6.1
+
+# IP/Network intelligence
+netaddr>=1.2.1
+# ipwhois: requires dnspython<=2.0.0, incompatible with wapiti3 (needs 2.8.0) -- use whois CLI instead
+whoisit>=2.8.0
+
+# Cryptographic operations (TLS cert parsing, key analysis)
+cryptography>=42.0.0
+pyOpenSSL>=24.0.0
+
+# SSH client (banner grabbing, credentialed scanning)
+paramiko>=3.4.0
+
+# Nmap XML output parser (structured data instead of raw text)
+python-nmap>=0.7.1
+
+# Hash identification
+hashid>=3.1.0
+
+# -- Phase 2 additions ---------------------------------------------------------
+
+# Web scanning (black-box, OWASP WSTG categories, JSON output)
+wapiti3==3.2.7
+
+# HTTP parameter discovery (feeds into sqlmap/ffuf)
+arjun>=2.2.4
+
+# OpenAPI/Swagger spec parsing
+prance>=23.6.21
+openapi-spec-validator>=0.7.1
+
+# Windows/AD protocol stack
+impacket>=0.12.0
+# enum4linux-ng: NOT on PyPI -- install via git clone (see Dockerfile)
+smbmap>=1.9.4
+ldap3>=2.9.1
+# netexec: NOT on PyPI as security tool -- install via pipx (see Dockerfile)
+
+# Raw packet crafting (requires --cap-add NET_RAW at runtime)
+scapy>=2.5.0
+
+# OSINT and DNS reconnaissance
+# fierce: requires dnspython==1.16.0, incompatible with wapiti3 (needs 2.8.0) -- use dnsrecon CLI instead
+# theHarvester: PyPI package is a stub (0.0.1) -- install via git clone (see Dockerfile)
+# ctfr: NOT on PyPI -- install via git clone (see Dockerfile)
+
+# OSINT frameworks
+holehe>=1.57.0
+sherlock-project>=0.15.0

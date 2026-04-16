@@ -32,8 +32,14 @@ services:
       LLM_MODEL: ${LLM_MODEL:-qwen3.5-35b-a3b-heretic}
     volumes:
       - ./output:/app/reports
+      - seclists:/opt/seclists
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
     stdin_open: true
     tty: true
 
 volumes:
   mariadb_data:
+  seclists:
+    external: true
