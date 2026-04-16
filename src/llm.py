@@ -222,6 +222,11 @@ def ask_llm_native(prompt: str, integrations: list | None = None) -> tuple:
 _MCP_WEB_SEARCH = [{"type": "plugin", "id": "mcp/web-search", "allowed_tools": ["web_search"]}]
 
 
+def _is_llm_error(text: str) -> bool:
+    """Return True when text is a Metatron error sentinel rather than model output."""
+    return not text or text.startswith("[!")
+
+
 def research_vulnerabilities(vulns: list, target: str) -> dict:
     """
     Use mcp/web-search to look up CVEs, active PoCs, and patch status for the
@@ -275,6 +280,11 @@ NOTES: <threat intelligence context>
         return {"research_text": text, "searches_performed": []}
 
     text, tool_calls = ask_llm_native(prompt, _MCP_WEB_SEARCH)
+    if _is_llm_error(text):
+        print(f"[!] MCP research failed ({text}). Falling back to training-data knowledge.")
+        text = ask_llm([{"role": "user", "content": prompt}])
+        tool_calls = []
+
     searches = [
         tc["tool"] + ": " + str(tc.get("arguments", {}))
         for tc in tool_calls
@@ -359,11 +369,16 @@ Plain text only. No markdown. No bold. No ## headers. Use exact section headers 
 Be operationally specific. Use real tool names and flags.
 """
 
-    if not MCP_ENABLED:
+    research_ok = not _is_llm_error(research_text)
+
+    if not MCP_ENABLED or not research_ok:
         full_report = ask_llm([{"role": "user", "content": prompt}])
     else:
         full_report, extra_calls = ask_llm_native(prompt, _MCP_WEB_SEARCH)
-        if extra_calls:
+        if _is_llm_error(full_report):
+            print(f"[!] MCP report generation failed. Falling back to training-data knowledge.")
+            full_report = ask_llm([{"role": "user", "content": prompt}])
+        elif extra_calls:
             print(f"[*] Report generation used {len(extra_calls)} additional web search(es).")
 
     def _extract_section(text: str, name: str) -> str:
