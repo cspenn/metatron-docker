@@ -106,8 +106,11 @@ def ask_llm(messages: list) -> str:
             "top_p":       0.9,
             "top_k":       10,
         }
+        headers = {"Content-Type": "application/json"}
+        if LLM_API_TOKEN:
+            headers["Authorization"] = f"Bearer {LLM_API_TOKEN}"
         print(f"\n[*] Sending to {MODEL_NAME} via LM Studio...")
-        resp = requests.post(LLM_URL, json=payload, timeout=LLM_TIMEOUT)
+        resp = requests.post(LLM_URL, headers=headers, json=payload, timeout=LLM_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
         response = strip_thinking(data["choices"][0]["message"]["content"])
@@ -152,7 +155,10 @@ def summarize_tool_output(raw_output: str) -> str:
             "temperature": 0.2,
             "top_p":       0.9,
         }
-        resp = requests.post(LLM_URL, json=payload, timeout=120)
+        hdrs = {"Content-Type": "application/json"}
+        if LLM_API_TOKEN:
+            hdrs["Authorization"] = f"Bearer {LLM_API_TOKEN}"
+        resp = requests.post(LLM_URL, headers=hdrs, json=payload, timeout=120)
         resp.raise_for_status()
         summary = resp.json()["choices"][0]["message"]["content"].strip()
         return summary if summary else raw_output
