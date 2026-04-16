@@ -128,7 +128,7 @@ LLM_MCP_ENABLED=true
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM_URL` | `http://host.docker.internal:1234/v1/chat/completions` | LM Studio OpenAI-compatible endpoint |
-| `LLM_MODEL` | `qwen3.6-35b-a3b-heretic-mixed-4-8` | Model identifier shown in LM Studio server tab |
+| `LLM_MODEL` | `qwen3.6-35b-a3b-heretic-mlx-mixed-4-8` | Model identifier shown in LM Studio server tab |
 | `LLM_API_TOKEN` | _(empty)_ | Bearer token from LM Studio. Required if authentication is enabled |
 | `LLM_MCP_ENABLED` | `true` | Set `false` to skip MCP research (uses training-data knowledge only) |
 | `LLM_THINKING` | `false` | Set `true` only when running Gemma 4 to prepend `<\|think\|>` for explicit reasoning mode. Ignored by Qwen and other families. |

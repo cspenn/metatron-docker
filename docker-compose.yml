@@ -28,8 +28,8 @@ services:
       DB_USER: ${MYSQL_USER}
       DB_PASSWORD: ${MYSQL_PASSWORD}
       DB_NAME: ${MYSQL_DATABASE}
-      LLM_URL: ${LLM_URL:-http://host.docker.internal:1234/v1/chat/completions}
-      LLM_MODEL: ${LLM_MODEL:-qwen3.6-35b-a3b-heretic-mixed-4-8}
+      LLM_URL: ${LLM_URL:-http://192.168.68.66:1234/v1/chat/completions}
+      LLM_MODEL: ${LLM_MODEL:-qwen3.6-35b-a3b-heretic-mlx-mixed-4-8}
       LLM_API_TOKEN: ${LLM_API_TOKEN:-}
       LLM_MCP_ENABLED: ${LLM_MCP_ENABLED:-true}
     volumes:

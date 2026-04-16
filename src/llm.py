@@ -15,7 +15,7 @@ from tools import run_tool_by_command
 from search import handle_search_dispatch
 
 LLM_URL        = os.environ.get("LLM_URL", "http://localhost:1234/v1/chat/completions")
-MODEL_NAME     = os.environ.get("LLM_MODEL", "qwen3.6-35b-a3b-heretic-mixed-4-8")
+MODEL_NAME     = os.environ.get("LLM_MODEL", "qwen3.6-35b-a3b-heretic-mlx-mixed-4-8")
 MAX_TOKENS     = 8192
 MAX_TOOL_LOOPS = 9
 LLM_TIMEOUT    = 600
