@@ -6,6 +6,7 @@ Reports are saved to /app/reports/ (mapped to ./output/ on the host via Docker v
 """
 
 import os
+import re
 import html
 import datetime
 import mysql.connector
@@ -33,6 +34,14 @@ RISK_COLORS = {
 }
 
 REPORT_DIR = "/app/reports"
+
+
+def _safe_target(target: str) -> str:
+    """Strip URL scheme and replace path-unsafe characters so target is safe in a filename."""
+    s = re.sub(r'^https?://', '', target)
+    s = re.sub(r'[/:*?"<>|\\]', '_', s)
+    s = re.sub(r'_+', '_', s)
+    return s.strip('_') or 'unknown'
 
 
 def get_connection():
@@ -92,7 +101,7 @@ def export_pdf(data, output_dir=None):
     sl_no  = h[0]
     target = h[1]
     ts     = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    fname  = os.path.join(output_dir, f"metatron_report_{sl_no}_{target}_{ts}.pdf")
+    fname  = os.path.join(output_dir, f"metatron_report_{sl_no}_{_safe_target(target)}_{ts}.pdf")
 
     doc    = SimpleDocTemplate(fname, pagesize=letter,
                                rightMargin=0.75*inch, leftMargin=0.75*inch,
@@ -207,7 +216,7 @@ def export_html(data, output_dir=None):
     sl_no  = h[0]
     target = h[1]
     ts     = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    fname  = os.path.join(output_dir, f"metatron_report_{sl_no}_{target}_{ts}.html")
+    fname  = os.path.join(output_dir, f"metatron_report_{sl_no}_{_safe_target(target)}_{ts}.html")
 
     risk      = "UNKNOWN"
     generated = ""
@@ -338,7 +347,7 @@ def export_red_team_pdf(target: str, sl_no: int, report: dict, output_dir: str =
     os.makedirs(output_dir, exist_ok=True)
 
     ts    = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    fname = os.path.join(output_dir, f"redteam_report_{sl_no}_{target}_{ts}.pdf")
+    fname = os.path.join(output_dir, f"redteam_report_{sl_no}_{_safe_target(target)}_{ts}.pdf")
 
     doc    = SimpleDocTemplate(fname, pagesize=letter,
                                rightMargin=0.75*inch, leftMargin=0.75*inch,
@@ -410,7 +419,7 @@ def export_red_team_html(target: str, sl_no: int, report: dict, output_dir: str 
     os.makedirs(output_dir, exist_ok=True)
 
     ts    = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    fname = os.path.join(output_dir, f"redteam_report_{sl_no}_{target}_{ts}.html")
+    fname = os.path.join(output_dir, f"redteam_report_{sl_no}_{_safe_target(target)}_{ts}.html")
 
     def _section_html(content: str) -> str:
         if not content:
