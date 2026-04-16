@@ -30,6 +30,8 @@ services:
       DB_NAME: ${MYSQL_DATABASE}
       LLM_URL: ${LLM_URL:-http://host.docker.internal:1234/v1/chat/completions}
       LLM_MODEL: ${LLM_MODEL:-qwen3.5-35b-a3b-heretic}
+      LLM_API_TOKEN: ${LLM_API_TOKEN:-}
+      LLM_MCP_ENABLED: ${LLM_MCP_ENABLED:-true}
     volumes:
       - ./output:/app/reports
       - seclists:/opt/seclists

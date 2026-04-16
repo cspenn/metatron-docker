@@ -31,7 +31,9 @@ from db import (
     print_session
 )
 from tools import interactive_tool_run
-from llm import analyse_target
+from llm import analyse_target, research_vulnerabilities, generate_red_team_report
+from db import save_red_team_report
+from export import export_red_team_menu
 
 
 # ─────────────────────────────────────────────
@@ -157,6 +159,25 @@ def new_scan():
     )
 
     success(f"All data saved. SL# {sl_no} | Risk: {result['risk_level']}")
+
+    # ── Red Team Research Phase ────────────────────────────────────────────
+    divider("RED TEAM RESEARCH")
+    info("This phase uses LM Studio's MCP web-search integration to look up live CVEs,")
+    info("active exploits, and generate a red team engagement brief.")
+    if confirm("Run live vulnerability research and generate red team report?"):
+        info("Researching vulnerabilities via MCP web-search...")
+        research = research_vulnerabilities(result["vulnerabilities"], target)
+        info("Generating red team engagement report...")
+        rt_report = generate_red_team_report(target, result, research)
+        save_red_team_report(
+            sl_no,
+            rt_report["research_data"],
+            rt_report["attack_chains"],
+            rt_report["red_team_directions"]
+        )
+        success("Red team report saved.")
+        if confirm("Export red team report now?"):
+            export_red_team_menu(target, sl_no, rt_report)
     divider()
 
     data = get_session(sl_no)
@@ -199,6 +220,46 @@ def view_history():
 
     if confirm("Export this session?"):
         export_menu(data)
+
+    if not data.get("red_team"):
+        if confirm("No red team report for this session. Generate one now?"):
+            from llm import research_vulnerabilities, generate_red_team_report
+            vulns = [
+                {"vuln_name": v[2], "severity": v[3], "port": v[4],
+                 "service": v[5], "description": v[6]}
+                for v in (data.get("vulns") or [])
+            ]
+            target = data["history"][1]
+            risk   = data["summary"][4] if data.get("summary") else "UNKNOWN"
+            summary_text = data["summary"][3] if data.get("summary") else ""
+            scan_stub = {
+                "vulnerabilities": vulns,
+                "exploits":        [],
+                "risk_level":      risk,
+                "summary":         summary_text
+            }
+            research = research_vulnerabilities(vulns, target)
+            rt_report = generate_red_team_report(target, scan_stub, research)
+            save_red_team_report(
+                sl_no,
+                rt_report["research_data"],
+                rt_report["attack_chains"],
+                rt_report["red_team_directions"]
+            )
+            success("Red team report saved.")
+            if confirm("Export red team report?"):
+                export_red_team_menu(target, sl_no, rt_report)
+    else:
+        if confirm("Export existing red team report?"):
+            rt = data["red_team"]
+            rt_report = {
+                # columns: 0=id, 1=sl_no, 2=research_data, 3=attack_chains, 4=red_team_directions, 5=generated_at
+                "research_data":       rt[2] or "",
+                "attack_chains":       rt[3] or "",
+                "red_team_directions": rt[4] or "",
+                "full_report":         (rt[2] or "") + "\n" + (rt[3] or "") + "\n" + (rt[4] or "")
+            }
+            export_red_team_menu(data["history"][1], sl_no, rt_report)
 
     if confirm("Edit or delete anything in this session?"):
         edit_delete_menu(sl_no)

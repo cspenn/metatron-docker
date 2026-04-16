@@ -323,6 +323,186 @@ def export_menu(data):
         return
 
 
+# =============================================================================
+# RED TEAM REPORT EXPORT
+# =============================================================================
+
+def export_red_team_pdf(target: str, sl_no: int, report: dict, output_dir: str = None) -> str:
+    """
+    Export the red team report as a standalone PDF.
+    report: dict returned by generate_red_team_report()
+    """
+    if output_dir is None:
+        output_dir = REPORT_DIR
+    os.makedirs(output_dir, exist_ok=True)
+
+    ts    = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    fname = os.path.join(output_dir, f"redteam_report_{sl_no}_{target}_{ts}.pdf")
+
+    doc    = SimpleDocTemplate(fname, pagesize=letter,
+                               rightMargin=0.75*inch, leftMargin=0.75*inch,
+                               topMargin=0.75*inch,   bottomMargin=0.75*inch)
+    styles = getSampleStyleSheet()
+    story  = []
+
+    title_style   = ParagraphStyle("Title", parent=styles["Title"],
+                                   fontSize=20, textColor=colors.HexColor("#cc0000"),
+                                   spaceAfter=6)
+    section_style = ParagraphStyle("Section", parent=styles["Heading2"],
+                                   fontSize=13, textColor=colors.HexColor("#cc6600"),
+                                   spaceBefore=14, spaceAfter=6)
+    body_style    = ParagraphStyle("Body", parent=styles["Normal"],
+                                   fontSize=9, leading=13,
+                                   fontName="Courier")
+
+    story.append(Paragraph("RED TEAM ENGAGEMENT BRIEF", title_style))
+    story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor("#cc0000")))
+    story.append(Spacer(1, 0.1*inch))
+
+    meta = [
+        ["Target",       target],
+        ["Session",      f"SL# {sl_no}"],
+        ["Generated",    datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+        ["Classification", "CONFIDENTIAL — Authorized Penetration Test Only"],
+    ]
+    meta_table = Table(meta, colWidths=[1.8*inch, 4.7*inch])
+    meta_table.setStyle(TableStyle([
+        ("BACKGROUND",  (0, 0), (0, -1), colors.HexColor("#eeeeee")),
+        ("FONTNAME",    (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE",    (0, 0), (-1, -1), 9),
+        ("GRID",        (0, 0), (-1, -1), 0.5, colors.HexColor("#cccccc")),
+        ("PADDING",     (0, 0), (-1, -1), 5),
+    ]))
+    story.append(meta_table)
+    story.append(Spacer(1, 0.2*inch))
+
+    for section_label, key in [
+        ("Section 1: Vulnerability Assessment",  "research_data"),
+        ("Section 2: Attack Chains",             "attack_chains"),
+        ("Section 3: Red Team Directions",       "red_team_directions"),
+    ]:
+        content = (report.get(key) or "").strip()
+        if not content:
+            continue
+        story.append(Paragraph(section_label, section_style))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#cc6600")))
+        story.append(Spacer(1, 0.05*inch))
+        for line in content.splitlines():
+            if line.strip():
+                story.append(Paragraph(line.replace("&", "&amp;")
+                                           .replace("<", "&lt;")
+                                           .replace(">", "&gt;"),
+                                        body_style))
+            else:
+                story.append(Spacer(1, 0.06*inch))
+        story.append(Spacer(1, 0.1*inch))
+
+    doc.build(story)
+    print(f"[+] Red team PDF saved: {fname}")
+    return fname
+
+
+def export_red_team_html(target: str, sl_no: int, report: dict, output_dir: str = None) -> str:
+    """
+    Export the red team report as a standalone dark-theme HTML file.
+    report: dict returned by generate_red_team_report()
+    """
+    if output_dir is None:
+        output_dir = REPORT_DIR
+    os.makedirs(output_dir, exist_ok=True)
+
+    ts    = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    fname = os.path.join(output_dir, f"redteam_report_{sl_no}_{target}_{ts}.html")
+
+    def _section_html(content: str) -> str:
+        if not content:
+            return "<p>No data.</p>"
+        lines = []
+        for line in content.splitlines():
+            if not line.strip():
+                lines.append("<br>")
+            elif line.startswith(("CHAIN ", "PHASE:", "SECTION:", "RESEARCH:",
+                                   "ENTRY:", "STEP:", "GOAL:", "ACTION:",
+                                   "DOCUMENT:", "MITRE:", "CVE:", "CVSS:",
+                                   "EXPLOITS:", "IN_THE_WILD:", "PATCH_STATUS:",
+                                   "NOTES:", "LIKELIHOOD:", "DIFFICULTY:",
+                                   "EXPECTED_OUTPUT:")):
+                key, _, val = line.partition(":")
+                lines.append(
+                    f'<span class="label">{key.strip()}:</span> '
+                    f'{val.strip()}<br>'
+                )
+            else:
+                lines.append(line + "<br>")
+        return "\n".join(lines)
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Red Team Brief - {target}</title>
+<style>
+  body       {{ background:#0d0d0d; color:#e0e0e0; font-family:monospace; padding:2em; }}
+  h1         {{ color:#cc0000; border-bottom:2px solid #cc0000; padding-bottom:0.3em; }}
+  h2         {{ color:#ff6600; margin-top:2em; border-left:3px solid #ff6600; padding-left:0.5em; }}
+  table      {{ border-collapse:collapse; width:100%; margin-bottom:1.5em; }}
+  th         {{ background:#1a1a1a; color:#aaa; text-align:left; padding:8px; }}
+  td         {{ border:1px solid #333; padding:8px; vertical-align:top; }}
+  .meta-label{{ color:#888; font-weight:bold; width:200px; }}
+  .section   {{ background:#111; border:1px solid #333; padding:1em 1.5em;
+                border-radius:4px; line-height:1.8; margin-bottom:2em; }}
+  .label     {{ color:#ff6600; font-weight:bold; }}
+  .classify  {{ background:#3a0000; color:#ff4444; padding:0.5em 1em;
+                border-radius:3px; display:inline-block; margin-bottom:1em; }}
+</style>
+</head>
+<body>
+<h1>RED TEAM ENGAGEMENT BRIEF</h1>
+<div class="classify">CONFIDENTIAL -- Authorized Penetration Test Only</div>
+<table>
+  <tr><td class="meta-label">Target</td><td>{target}</td></tr>
+  <tr><td class="meta-label">Session</td><td>SL# {sl_no}</td></tr>
+  <tr><td class="meta-label">Generated</td><td>{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</td></tr>
+</table>
+
+<h2>Section 1: Vulnerability Assessment</h2>
+<div class="section">{_section_html(report.get("research_data", ""))}</div>
+
+<h2>Section 2: Attack Chains</h2>
+<div class="section">{_section_html(report.get("attack_chains", ""))}</div>
+
+<h2>Section 3: Red Team Directions</h2>
+<div class="section">{_section_html(report.get("red_team_directions", ""))}</div>
+
+</body>
+</html>"""
+
+    with open(fname, "w") as fh:
+        fh.write(html)
+    print(f"[+] Red team HTML saved: {fname}")
+    return fname
+
+
+def export_red_team_menu(target: str, sl_no: int, report: dict):
+    """Interactive menu to export the red team report."""
+    print("\n[ RED TEAM REPORT EXPORT ]")
+    print("  [1] Export as PDF")
+    print("  [2] Export as HTML")
+    print("  [3] Export both")
+    print("  [4] Skip")
+    choice = input("\nChoice: ").strip()
+
+    if choice == "1":
+        export_red_team_pdf(target, sl_no, report)
+    elif choice == "2":
+        export_red_team_html(target, sl_no, report)
+    elif choice == "3":
+        export_red_team_pdf(target, sl_no, report)
+        export_red_team_html(target, sl_no, report)
+    else:
+        return
+
+
 if __name__ == "__main__":
     rows = fetch_all_history()
     if not rows:

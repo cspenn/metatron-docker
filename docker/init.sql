@@ -52,3 +52,13 @@ CREATE TABLE IF NOT EXISTS summary (
   generated_at DATETIME,
   FOREIGN KEY (sl_no) REFERENCES history(sl_no)
 );
+
+CREATE TABLE IF NOT EXISTS red_team_reports (
+  id                   INT AUTO_INCREMENT PRIMARY KEY,
+  sl_no                INT NOT NULL,
+  research_data        LONGTEXT,
+  attack_chains        LONGTEXT,
+  red_team_directions  LONGTEXT,
+  generated_at         DATETIME,
+  FOREIGN KEY (sl_no) REFERENCES history(sl_no) ON DELETE CASCADE
+);

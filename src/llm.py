@@ -24,6 +24,17 @@ LLM_TIMEOUT    = 600
 # For Qwen3.5, thinking is controlled by sampling params and is harmless to set.
 ENABLE_THINKING = os.environ.get("LLM_THINKING", "false").lower() == "true"
 
+# ── MCP / Native API ─────────────────────────────────────────────────────────
+# Derive the LM Studio base URL (host:port only) from LLM_URL.
+# e.g. "http://host.docker.internal:1234/v1/chat/completions"
+#   -> "http://host.docker.internal:1234"
+_url_scheme   = LLM_URL.split("://", 1)
+LLM_BASE_URL  = (_url_scheme[0] + "://" + _url_scheme[1].split("/", 1)[0]
+                 if len(_url_scheme) > 1 else LLM_URL.rstrip("/"))
+NATIVE_URL    = LLM_BASE_URL + "/api/v1/chat"
+LLM_API_TOKEN = os.environ.get("LLM_API_TOKEN", "")
+MCP_ENABLED   = os.environ.get("LLM_MCP_ENABLED", "true").lower() == "true"
+
 _SYSTEM_PROMPT_BASE = """You are METATRON, an elite AI penetration testing assistant running on Parrot OS.
 You are precise, technical, and direct. No fluff.
 
@@ -147,6 +158,223 @@ def summarize_tool_output(raw_output: str) -> str:
         return summary if summary else raw_output
     except Exception:
         return raw_output
+
+
+def ask_llm_native(prompt: str, integrations: list = None) -> tuple:
+    """
+    Call the LM Studio native /api/v1/chat endpoint with optional MCP integrations.
+    Returns (text_response: str, tool_calls: list).
+    Each item in tool_calls is a dict with keys: tool, arguments, output.
+    Falls back gracefully if the endpoint is unavailable.
+    """
+    if integrations is None:
+        integrations = []
+    headers = {"Content-Type": "application/json"}
+    if LLM_API_TOKEN:
+        headers["Authorization"] = f"Bearer {LLM_API_TOKEN}"
+    payload = {
+        "model":          MODEL_NAME,
+        "input":          prompt,
+        "stream":         False,
+        "context_length": MAX_TOKENS,
+        "temperature":    0.4,
+        "top_p":          0.9,
+    }
+    if integrations:
+        payload["integrations"] = integrations
+    try:
+        print(f"\n[*] MCP research call via {NATIVE_URL}")
+        resp = requests.post(NATIVE_URL, headers=headers, json=payload, timeout=LLM_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        output_items = data.get("output", [])
+        text_parts   = []
+        tool_calls   = []
+        for item in output_items:
+            t = item.get("type", "")
+            if t == "message":
+                text_parts.append(item.get("content", ""))
+            elif t == "tool_call":
+                tool_calls.append({
+                    "tool":      item.get("tool", ""),
+                    "arguments": item.get("arguments", {}),
+                    "output":    item.get("output", ""),
+                })
+        text = strip_thinking("\n".join(text_parts)).strip()
+        if not text:
+            text = "[!] MCP call returned no message content."
+        return text, tool_calls
+    except requests.exceptions.ConnectionError:
+        return f"[!] Cannot connect to LM Studio native API at {NATIVE_URL}.", []
+    except requests.exceptions.HTTPError as e:
+        return f"[!] LM Studio native API error: {e}", []
+    except Exception as e:
+        return f"[!] Unexpected error from native API: {e}", []
+
+
+_MCP_WEB_SEARCH = [{"type": "plugin", "id": "mcp/web-search", "allowed_tools": ["web_search"]}]
+
+
+def research_vulnerabilities(vulns: list, target: str) -> dict:
+    """
+    Use mcp/web-search to look up CVEs, active PoCs, and patch status for the
+    most significant vulnerabilities from a scan.
+
+    vulns:  list of dicts from parse_vulnerabilities()
+    target: the scan target string
+
+    Returns {"research_text": str, "searches_performed": list}
+    """
+    critical_high = [v for v in vulns if v.get("severity", "").lower() in ("critical", "high")]
+    if not critical_high:
+        critical_high = vulns[:3]
+
+    if not critical_high:
+        return {
+            "research_text":      "No vulnerabilities found to research.",
+            "searches_performed": []
+        }
+
+    vuln_summary = ""
+    for v in critical_high:
+        vuln_summary += (
+            f"- {v['vuln_name']} | Severity: {v['severity']} | "
+            f"Port: {v['port']} | Service: {v['service']}\n"
+            f"  {v['description']}\n"
+        )
+
+    prompt = f"""You are researching vulnerabilities found during a penetration test.
+Target: {target}
+
+Vulnerabilities requiring research:
+{vuln_summary}
+
+For each vulnerability, use web_search to find:
+1. Current CVE identifiers and CVSS score
+2. Whether public exploits or proof-of-concept code exist right now
+3. Whether actively exploited in the wild (ransomware groups, APTs, etc.)
+4. Current patch status and typical organizational deployment lag
+
+After researching, summarize your findings using this format for each vulnerability:
+RESEARCH: <vuln_name>
+CVE: <CVE IDs or "none found">
+CVSS: <score and vector, or "unknown">
+EXPLOITS: <yes/no -- describe available PoCs and tools>
+IN_THE_WILD: <yes/no -- describe active exploitation campaigns>
+PATCH_STATUS: <patched/unpatched in typical deployments>
+NOTES: <threat intelligence context>
+"""
+
+    if not MCP_ENABLED:
+        text = ask_llm([{"role": "user", "content": prompt}])
+        return {"research_text": text, "searches_performed": []}
+
+    text, tool_calls = ask_llm_native(prompt, _MCP_WEB_SEARCH)
+    searches = [
+        tc["tool"] + ": " + str(tc.get("arguments", {}))
+        for tc in tool_calls
+    ]
+    print(f"[*] Research complete. {len(tool_calls)} web search(es) performed.")
+    return {"research_text": text, "searches_performed": searches}
+
+
+def generate_red_team_report(target: str, scan_result: dict, research: dict) -> dict:
+    """
+    Synthesize scan analysis + live research into a structured red team report.
+
+    scan_result: dict returned by analyse_target()
+    research:    dict returned by research_vulnerabilities()
+
+    Returns {
+        "research_data":       str,
+        "attack_chains":       str,
+        "red_team_directions": str,
+        "full_report":         str
+    }
+    """
+    research_text = research.get("research_text", "No research data available.")
+
+    vuln_list = ""
+    for v in scan_result.get("vulnerabilities", []):
+        vuln_list += (
+            f"  - {v['vuln_name']} | {v['severity']} | "
+            f"port {v['port']} | {v['service']}\n"
+        )
+    if not vuln_list:
+        vuln_list = "  No structured vulnerabilities parsed.\n"
+
+    exploit_list = ""
+    for e in scan_result.get("exploits", []):
+        exploit_list += f"  - {e['exploit_name']} via {e['tool_used']}: {e['payload']}\n"
+
+    prompt = f"""You are a senior red team operator writing an engagement brief.
+You have completed a scan and live vulnerability research on the target.
+
+TARGET: {target}
+RISK LEVEL: {scan_result.get("risk_level", "UNKNOWN")}
+AI ANALYSIS SUMMARY: {scan_result.get("summary", "None")}
+
+VULNERABILITIES FOUND:
+{vuln_list}
+EXPLOITS IDENTIFIED:
+{exploit_list if exploit_list else "  None structured."}
+
+LIVE VULNERABILITY RESEARCH:
+{research_text}
+
+Write a red team report with EXACTLY these three sections using these exact headers:
+
+SECTION: VULNERABILITY_ASSESSMENT
+For each vulnerability found, assess:
+- Active exploitation in the wild (yes/no and by which threat actors)
+- CVSS score if available from research
+- Patch availability and typical organizational lag
+- Confidence: CONFIRMED / PROBABLE / THEORETICAL
+
+SECTION: ATTACK_CHAINS
+Show how vulnerabilities combine for maximum attacker impact.
+For each chain:
+CHAIN <N>: <descriptive name>
+ENTRY: <initial access vector>
+STEP: <attacker action> -> <result>
+STEP: <attacker action> -> <result>
+GOAL: <final attacker objective>
+LIKELIHOOD: HIGH|MEDIUM|LOW
+DIFFICULTY: TRIVIAL|LOW|MEDIUM|HIGH
+
+SECTION: RED_TEAM_DIRECTIONS
+Step-by-step operational guide for the red team to implement and document the chains above.
+For each step:
+PHASE: <Recon|Initial Access|Execution|Persistence|Privilege Escalation|Lateral Movement|Collection|Exfiltration>
+ACTION: <exact tool and command with flags>
+EXPECTED_OUTPUT: <what successful execution looks like>
+DOCUMENT: <what the operator must record in engagement notes>
+MITRE: <ATT&CK technique ID>
+
+Plain text only. No markdown. No bold. No ## headers. Use exact section headers shown.
+Be operationally specific. Use real tool names and flags.
+"""
+
+    if not MCP_ENABLED:
+        full_report = ask_llm([{"role": "user", "content": prompt}])
+    else:
+        full_report, extra_calls = ask_llm_native(prompt, _MCP_WEB_SEARCH)
+        if extra_calls:
+            print(f"[*] Report generation used {len(extra_calls)} additional web search(es).")
+
+    def _extract_section(text: str, name: str) -> str:
+        m = re.search(
+            rf"SECTION:\s*{re.escape(name)}\s*\n(.*?)(?=SECTION:|$)",
+            text, re.DOTALL | re.IGNORECASE
+        )
+        return m.group(1).strip() if m else ""
+
+    return {
+        "research_data":       research_text,
+        "attack_chains":       _extract_section(full_report, "ATTACK_CHAINS"),
+        "red_team_directions": _extract_section(full_report, "RED_TEAM_DIRECTIONS"),
+        "full_report":         full_report
+    }
 
 
 def run_tool_calls(calls: list) -> str:
