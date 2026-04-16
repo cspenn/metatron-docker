@@ -1,0 +1,39 @@
+services:
+  mariadb:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "3306:3306"
+
+  metatron:
+    build: .
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      DB_HOST: mariadb
+      DB_USER: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_NAME: ${MYSQL_DATABASE}
+      LLM_URL: ${LLM_URL:-http://host.docker.internal:1234/v1/chat/completions}
+      LLM_MODEL: ${LLM_MODEL:-qwen3.5-35b-a3b-heretic}
+    volumes:
+      - ./output:/app/reports
+    stdin_open: true
+    tty: true
+
+volumes:
+  mariadb_data:

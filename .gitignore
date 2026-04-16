@@ -1,0 +1,26 @@
+# ── Credentials & secrets ──────────────────────
+.env
+credentials.yml
+
+# ── Hidden / tool folders ───────────────────────
+.*/
+
+# ── Project scaffold folders (not for repo) ─────
+archived/
+data/
+docs/
+input/
+logs/
+output/
+references/
+temp/
+tests/
+
+# ── Python ──────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/

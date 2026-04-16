@@ -1,0 +1,16 @@
+.git
+.claude
+__pycache__
+*.pyc
+*.pyo
+.env
+.venv
+venv/
+docs/
+references/
+archived/
+temp/
+logs/
+tests/
+*.md
+!src/Modelfile
