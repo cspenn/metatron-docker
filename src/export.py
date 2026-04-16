@@ -6,6 +6,7 @@ Reports are saved to /app/reports/ (mapped to ./output/ on the host via Docker v
 """
 
 import os
+import html
 import datetime
 import mysql.connector
 from reportlab.lib.pagesizes import letter
@@ -389,10 +390,7 @@ def export_red_team_pdf(target: str, sl_no: int, report: dict, output_dir: str =
         story.append(Spacer(1, 0.05*inch))
         for line in content.splitlines():
             if line.strip():
-                story.append(Paragraph(line.replace("&", "&amp;")
-                                           .replace("<", "&lt;")
-                                           .replace(">", "&gt;"),
-                                        body_style))
+                story.append(Paragraph(html.escape(line), body_style))
             else:
                 story.append(Spacer(1, 0.06*inch))
         story.append(Spacer(1, 0.1*inch))

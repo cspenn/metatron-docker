@@ -72,7 +72,7 @@ docker run --rm -v seclists:/opt/seclists alpine/git \
 
 **a. Load a model and start the server**
 
-Open LM Studio, load your model (recommended: any Qwen3.5 MoE or Gemma 4 model), go to the **Local Server** tab, and click **Start Server**.
+Open LM Studio, load your model (recommended: any Qwen 3 MoE or Gemma 4 model), go to the **Local Server** tab, and click **Start Server**.
 
 **b. Enable MCP server access**
 
@@ -128,10 +128,10 @@ LLM_MCP_ENABLED=true
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM_URL` | `http://host.docker.internal:1234/v1/chat/completions` | LM Studio OpenAI-compatible endpoint |
-| `LLM_MODEL` | `qwen3.5-35b-a3b-heretic` | Model identifier shown in LM Studio server tab |
+| `LLM_MODEL` | `qwen3.6-35b-a3b-heretic-mixed-4-8` | Model identifier shown in LM Studio server tab |
 | `LLM_API_TOKEN` | _(empty)_ | Bearer token from LM Studio. Required if authentication is enabled |
 | `LLM_MCP_ENABLED` | `true` | Set `false` to skip MCP research (uses training-data knowledge only) |
-| `LLM_THINKING` | `false` | Set `true` to prepend `<\|think\|>` for Gemma 4 explicit reasoning mode |
+| `LLM_THINKING` | `false` | Set `true` only when running Gemma 4 to prepend `<\|think\|>` for explicit reasoning mode. Ignored by Qwen and other families. |
 | `MYSQL_ROOT_PASSWORD` | `metatron_root` | MariaDB root password |
 | `MYSQL_DATABASE` | `metatron` | Database name |
 | `MYSQL_USER` | `metatron` | Application DB user |
@@ -169,15 +169,19 @@ At the main menu:
 [?] Enter target IP or domain: example.com
 
 [ SELECT TOOLS TO RUN ]
-  [1]  nmap              [10] wafw00f
-  [2]  whois             [11] enum4linux
-  [3]  whatweb           [12] snmpwalk
-  [4]  curl headers      [13] dnsrecon
-  [5]  dig DNS           [14] theHarvester
-  [6]  nikto             [15] searchsploit
-  [7]  sslscan           [16] masscan
-  [8]  testssl           [17] subfinder
-  [9]  sqlmap            [18] nuclei ...
+  [1]  nmap              [14] theHarvester
+  [2]  whois             [15] searchsploit
+  [3]  whatweb           [16] masscan
+  [4]  curl headers      [17] subfinder
+  [5]  dig DNS           [18] nuclei
+  [6]  nikto             [19] httpx_pd
+  [7]  sslscan           [20] ffuf
+  [8]  testssl           [21] katana
+  [9]  sqlmap            [22] gau
+  [10] wafw00f           [23] wapiti
+  [11] enum4linux        [24] arjun
+  [12] snmpwalk          [25] dalfox
+  [13] dnsrecon
   [a]  Run all (except nikto)
   [n]  Run all + nikto (slow)
 
@@ -212,7 +216,7 @@ After tools run, the LLM analyses all output, saves findings, then offers the MC
 | 16 | masscan | High-speed full port scan (requires NET_RAW) |
 
 Additional Phase 1 tools available via LLM dispatch (not in numbered menu):
-`hydra`, `john`, `ncrack`, `exiftool`, `smbclient`, `onesixtyone`, `hping3`, `arp-scan`, `commix`, `ctfr`, `dirb`
+`hydra`, `john`, `ncrack`, `hashid`, `exiftool`, `smbclient`, `onesixtyone`, `snmpbulkwalk`, `hping3`, `arp-scan`, `nc`, `netcat`, `commix`, `dirb`, `sslyze`
 
 ### Phase 2 — Go binaries and pip
 
@@ -229,13 +233,13 @@ Additional Phase 1 tools available via LLM dispatch (not in numbered menu):
 | 25 | dalfox | XSS scanner |
 
 Additional Phase 2 tools available via LLM dispatch:
-`dnsx`, `feroxbuster`, `waybackurls`, `hakrawler`
+`dnsx`, `feroxbuster`, `waybackurls`, `hakrawler`, `wapiti3`
 
 ---
 
 ## LLM Tool Dispatch
 
-During analysis the LLM can call any tool in `ALLOWED_TOOLS` (47 entries) by emitting tags in its response:
+During analysis the LLM can call any tool in `ALLOWED_TOOLS` (48 entries) by emitting tags in its response:
 
 ```
 [TOOL: nmap -sV 192.168.1.1]       runs any allowed CLI tool
@@ -455,7 +459,7 @@ metatron-docker/
 │   ├── metatron.py             # Main CLI entry point and menu system
 │   ├── db.py                   # MariaDB CRUD — all 6 tables
 │   ├── llm.py                  # LM Studio client: analysis, MCP research, red team report
-│   ├── tools.py                # Tool runners, ALLOWED_TOOLS (47 entries), TOOLS_MENU (25 entries)
+│   ├── tools.py                # Tool runners, ALLOWED_TOOLS (48 entries), TOOLS_MENU (25 entries)
 │   ├── search.py               # DuckDuckGo search integration
 │   ├── export.py               # PDF/HTML export for scan reports and red team briefs
 │   └── requirements.txt        # Python dependencies

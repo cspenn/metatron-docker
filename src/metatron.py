@@ -4,7 +4,6 @@ METATRON - metatron.py
 Main CLI entry point. Wires db.py + tools.py + search.py + llm.py together.
 Run with: python metatron.py
 """
-from export import export_menu
 import os
 import sys
 from db import (
@@ -14,6 +13,7 @@ from db import (
     save_fix,
     save_exploit,
     save_summary,
+    save_red_team_report,
     get_all_history,
     get_session,
     get_vulnerabilities,
@@ -31,9 +31,8 @@ from db import (
     print_session
 )
 from tools import interactive_tool_run
-from llm import analyse_target, research_vulnerabilities, generate_red_team_report
-from db import save_red_team_report
-from export import export_red_team_menu
+from llm import analyse_target, research_vulnerabilities, generate_red_team_report, MODEL_NAME
+from export import export_menu, export_red_team_menu
 
 
 # ─────────────────────────────────────────────
@@ -42,7 +41,7 @@ from export import export_red_team_menu
 
 def banner():
     os.system("clear")
-    print("""
+    print(f"""
 \033[91m
     ███╗   ███╗███████╗████████╗ █████╗ ████████╗██████╗  ██████╗ ███╗   ██╗
     ████╗ ████║██╔════╝╚══██╔══╝██╔══██╗╚══██╔══╝██╔══██╗██╔═══██╗████╗  ██║
@@ -51,7 +50,7 @@ def banner():
     ██║ ╚═╝ ██║███████╗   ██║   ██║  ██║   ██║   ██║  ██║╚██████╔╝██║ ╚████║
     ╚═╝     ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝
 \033[0m
-    \033[90mAI Penetration Testing Assistant  |  Qwen3.5-35B-A3B-Heretic  |  Docker\033[0m
+    \033[90mAI Penetration Testing Assistant  |  {MODEL_NAME}  |  Docker\033[0m
     \033[90m─────────────────────────────────────────────────────────────────────\033[0m
 """)
 
@@ -223,7 +222,6 @@ def view_history():
 
     if not data.get("red_team"):
         if confirm("No red team report for this session. Generate one now?"):
-            from llm import research_vulnerabilities, generate_red_team_report
             vulns = [
                 {"vuln_name": v[2], "severity": v[3], "port": v[4],
                  "service": v[5], "description": v[6]}
@@ -251,13 +249,12 @@ def view_history():
                 export_red_team_menu(target, sl_no, rt_report)
     else:
         if confirm("Export existing red team report?"):
+            # red_team columns: 0=id, 1=sl_no, 2=research_data, 3=attack_chains, 4=red_team_directions, 5=generated_at
             rt = data["red_team"]
             rt_report = {
-                # columns: 0=id, 1=sl_no, 2=research_data, 3=attack_chains, 4=red_team_directions, 5=generated_at
                 "research_data":       rt[2] or "",
                 "attack_chains":       rt[3] or "",
                 "red_team_directions": rt[4] or "",
-                "full_report":         (rt[2] or "") + "\n" + (rt[3] or "") + "\n" + (rt[4] or "")
             }
             export_red_team_menu(data["history"][1], sl_no, rt_report)
 

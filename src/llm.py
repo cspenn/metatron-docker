@@ -3,37 +3,37 @@
 METATRON - llm.py
 LM Studio interface (OpenAI-compatible API) for the Metatron model.
 Builds prompts, handles AI responses, runs tool dispatch loop.
-Model: Qwen3.5-35B-A3B-Heretic (configured via LLM_MODEL env var)
+Model: configured via LLM_MODEL env var (default: Qwen 3.6 35B-A3B Heretic)
 LM Studio must be running on the host at LLM_URL (default: http://localhost:1234)
 """
 
 import os
 import re
+from urllib.parse import urlparse
 import requests
 from tools import run_tool_by_command
 from search import handle_search_dispatch
 
 LLM_URL        = os.environ.get("LLM_URL", "http://localhost:1234/v1/chat/completions")
-MODEL_NAME     = os.environ.get("LLM_MODEL", "qwen3.5-35b-a3b-heretic")
+MODEL_NAME     = os.environ.get("LLM_MODEL", "qwen3.6-35b-a3b-heretic-mixed-4-8")
 MAX_TOKENS     = 8192
 MAX_TOOL_LOOPS = 9
 LLM_TIMEOUT    = 600
 
-# Set LLM_THINKING=true to activate explicit reasoning mode.
-# Prepends <|think|> to the system prompt (Gemma 4 native token).
-# For Qwen3.5, thinking is controlled by sampling params and is harmless to set.
 ENABLE_THINKING = os.environ.get("LLM_THINKING", "false").lower() == "true"
 
-# ── MCP / Native API ─────────────────────────────────────────────────────────
-# Derive the LM Studio base URL (host:port only) from LLM_URL.
-# e.g. "http://host.docker.internal:1234/v1/chat/completions"
-#   -> "http://host.docker.internal:1234"
-_url_scheme   = LLM_URL.split("://", 1)
-LLM_BASE_URL  = (_url_scheme[0] + "://" + _url_scheme[1].split("/", 1)[0]
-                 if len(_url_scheme) > 1 else LLM_URL.rstrip("/"))
+_parsed       = urlparse(LLM_URL)
+LLM_BASE_URL  = f"{_parsed.scheme}://{_parsed.netloc}" if _parsed.netloc else LLM_URL.rstrip("/")
 NATIVE_URL    = LLM_BASE_URL + "/api/v1/chat"
 LLM_API_TOKEN = os.environ.get("LLM_API_TOKEN", "")
 MCP_ENABLED   = os.environ.get("LLM_MCP_ENABLED", "true").lower() == "true"
+
+
+def _build_headers() -> dict:
+    headers = {"Content-Type": "application/json"}
+    if LLM_API_TOKEN:
+        headers["Authorization"] = f"Bearer {LLM_API_TOKEN}"
+    return headers
 
 _SYSTEM_PROMPT_BASE = """You are METATRON, an elite AI penetration testing assistant running on Parrot OS.
 You are precise, technical, and direct. No fluff.
@@ -75,9 +75,19 @@ IMPORTANT RULES FOR ACCURACY:
 - Only assign CRITICAL if there is direct evidence of exploitability
 - If evidence is weak mark severity as LOW with note: unconfirmed"""
 
-# Prepend <|think|> for Gemma 4 explicit thinking mode when requested.
-# This token is recognised by LM Studio's Gemma 4 template; other models treat it as text.
-SYSTEM_PROMPT = ("<|think|>\n" + _SYSTEM_PROMPT_BASE) if ENABLE_THINKING else _SYSTEM_PROMPT_BASE
+def _thinking_prefix() -> str:
+    """Return the thinking-mode prefix appropriate for the loaded model family.
+
+    Gemma 4 uses '<|think|>'. Qwen 3 handles thinking server-side via its
+    native chat template, so no prefix is needed (injecting '<|think|>' would
+    leak as literal text). Unknown families fall through to empty string.
+    """
+    if "gemma" in MODEL_NAME.lower():
+        return "<|think|>\n"
+    return ""
+
+
+SYSTEM_PROMPT = (_thinking_prefix() + _SYSTEM_PROMPT_BASE) if ENABLE_THINKING else _SYSTEM_PROMPT_BASE
 
 
 def strip_thinking(text: str) -> str:
@@ -106,11 +116,8 @@ def ask_llm(messages: list) -> str:
             "top_p":       0.9,
             "top_k":       10,
         }
-        headers = {"Content-Type": "application/json"}
-        if LLM_API_TOKEN:
-            headers["Authorization"] = f"Bearer {LLM_API_TOKEN}"
         print(f"\n[*] Sending to {MODEL_NAME} via LM Studio...")
-        resp = requests.post(LLM_URL, headers=headers, json=payload, timeout=LLM_TIMEOUT)
+        resp = requests.post(LLM_URL, headers=_build_headers(), json=payload, timeout=LLM_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
         response = strip_thinking(data["choices"][0]["message"]["content"])
@@ -155,10 +162,7 @@ def summarize_tool_output(raw_output: str) -> str:
             "temperature": 0.2,
             "top_p":       0.9,
         }
-        hdrs = {"Content-Type": "application/json"}
-        if LLM_API_TOKEN:
-            hdrs["Authorization"] = f"Bearer {LLM_API_TOKEN}"
-        resp = requests.post(LLM_URL, headers=hdrs, json=payload, timeout=120)
+        resp = requests.post(LLM_URL, headers=_build_headers(), json=payload, timeout=120)
         resp.raise_for_status()
         summary = resp.json()["choices"][0]["message"]["content"].strip()
         return summary if summary else raw_output
@@ -166,7 +170,7 @@ def summarize_tool_output(raw_output: str) -> str:
         return raw_output
 
 
-def ask_llm_native(prompt: str, integrations: list = None) -> tuple:
+def ask_llm_native(prompt: str, integrations: list | None = None) -> tuple:
     """
     Call the LM Studio native /api/v1/chat endpoint with optional MCP integrations.
     Returns (text_response: str, tool_calls: list).
@@ -175,9 +179,6 @@ def ask_llm_native(prompt: str, integrations: list = None) -> tuple:
     """
     if integrations is None:
         integrations = []
-    headers = {"Content-Type": "application/json"}
-    if LLM_API_TOKEN:
-        headers["Authorization"] = f"Bearer {LLM_API_TOKEN}"
     payload = {
         "model":          MODEL_NAME,
         "input":          prompt,
@@ -190,7 +191,7 @@ def ask_llm_native(prompt: str, integrations: list = None) -> tuple:
         payload["integrations"] = integrations
     try:
         print(f"\n[*] MCP research call via {NATIVE_URL}")
-        resp = requests.post(NATIVE_URL, headers=headers, json=payload, timeout=LLM_TIMEOUT)
+        resp = requests.post(NATIVE_URL, headers=_build_headers(), json=payload, timeout=LLM_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
         output_items = data.get("output", [])
@@ -236,10 +237,8 @@ def research_vulnerabilities(vulns: list, target: str) -> dict:
         critical_high = vulns[:3]
 
     if not critical_high:
-        return {
-            "research_text":      "No vulnerabilities found to research.",
-            "searches_performed": []
-        }
+        return {"research_text": "No vulnerabilities found to research.",
+                "searches_performed": []}
 
     vuln_summary = ""
     for v in critical_high:
@@ -295,7 +294,6 @@ def generate_red_team_report(target: str, scan_result: dict, research: dict) -> 
         "research_data":       str,
         "attack_chains":       str,
         "red_team_directions": str,
-        "full_report":         str
     }
     """
     research_text = research.get("research_text", "No research data available.")
@@ -379,7 +377,6 @@ Be operationally specific. Use real tool names and flags.
         "research_data":       research_text,
         "attack_chains":       _extract_section(full_report, "ATTACK_CHAINS"),
         "red_team_directions": _extract_section(full_report, "RED_TEAM_DIRECTIONS"),
-        "full_report":         full_report
     }
 
 
@@ -545,14 +542,13 @@ If analysis is complete, give the final RISK_LEVEL and SUMMARY."""})
 
 if __name__ == "__main__":
     print("[ llm.py test -- direct LM Studio connectivity check ]\n")
-    base_url = LLM_URL.rsplit("/", 2)[0]
     try:
-        r = requests.get(f"{base_url}/v1/models", timeout=5)
+        r = requests.get(f"{LLM_BASE_URL}/v1/models", headers=_build_headers(), timeout=5)
         models = r.json()
-        print(f"[+] LM Studio is running at {base_url}")
+        print(f"[+] LM Studio is running at {LLM_BASE_URL}")
         print(f"[+] Available models: {[m.get('id', '?') for m in models.get('data', [])]}")
     except Exception:
-        print(f"[!] LM Studio not reachable at {base_url}. Open LM Studio and start the Local Server.")
+        print(f"[!] LM Studio not reachable at {LLM_BASE_URL}. Open LM Studio and start the Local Server.")
         exit(1)
 
     target = input("Test target: ").strip()

@@ -14,14 +14,39 @@ from datetime import datetime
 # CONNECTION
 # ─────────────────────────────────────────────
 
+_schema_bootstrapped = False
+
+
 def get_connection():
     """Returns a MariaDB connection configured via environment variables."""
-    return mysql.connector.connect(
+    conn = mysql.connector.connect(
         host=os.environ.get("DB_HOST", "localhost"),
         user=os.environ.get("DB_USER", "metatron"),
         password=os.environ.get("DB_PASSWORD", "123"),
         database=os.environ.get("DB_NAME", "metatron"),
     )
+    global _schema_bootstrapped
+    if not _schema_bootstrapped:
+        _ensure_red_team_table(conn)
+        _schema_bootstrapped = True
+    return conn
+
+
+def _ensure_red_team_table(conn):
+    """Create red_team_reports table once per process for pre-Phase-3 installs."""
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS red_team_reports (
+            id                   INT AUTO_INCREMENT PRIMARY KEY,
+            sl_no                INT NOT NULL,
+            research_data        LONGTEXT,
+            attack_chains        LONGTEXT,
+            red_team_directions  LONGTEXT,
+            generated_at         DATETIME,
+            FOREIGN KEY (sl_no) REFERENCES history(sl_no) ON DELETE CASCADE
+        )
+    """)
+    conn.commit()
 
 
 # ─────────────────────────────────────────────
@@ -102,29 +127,9 @@ def save_summary(sl_no: int, raw_scan: str, ai_analysis: str, risk_level: str):
     conn.close()
 
 
-def ensure_red_team_table():
-    """Create red_team_reports table if it does not exist (handles existing DB installs)."""
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS red_team_reports (
-            id                   INT AUTO_INCREMENT PRIMARY KEY,
-            sl_no                INT NOT NULL,
-            research_data        LONGTEXT,
-            attack_chains        LONGTEXT,
-            red_team_directions  LONGTEXT,
-            generated_at         DATETIME,
-            FOREIGN KEY (sl_no) REFERENCES history(sl_no) ON DELETE CASCADE
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
 def save_red_team_report(sl_no: int, research_data: str,
                          attack_chains: str, red_team_directions: str) -> int:
     """Insert a red team report row. Returns its id."""
-    ensure_red_team_table()
     conn = get_connection()
     c = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -142,7 +147,6 @@ def save_red_team_report(sl_no: int, research_data: str,
 
 def get_red_team_report(sl_no: int):
     """Return the red team report row for sl_no, or None if not found."""
-    ensure_red_team_table()
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT * FROM red_team_reports WHERE sl_no = %s ORDER BY id DESC LIMIT 1",
@@ -186,13 +190,9 @@ def get_session(sl_no: int) -> dict:
     c.execute("SELECT * FROM summary WHERE sl_no = %s", (sl_no,))
     summary = c.fetchone()
 
-    red_team = None
-    try:
-        c.execute("SELECT * FROM red_team_reports WHERE sl_no = %s ORDER BY id DESC LIMIT 1",
-                  (sl_no,))
-        red_team = c.fetchone()
-    except Exception:
-        pass  # table may not exist on older installs
+    c.execute("SELECT * FROM red_team_reports WHERE sl_no = %s ORDER BY id DESC LIMIT 1",
+              (sl_no,))
+    red_team = c.fetchone()
 
     conn.close()
 
@@ -337,10 +337,7 @@ def delete_full_session(sl_no: int):
     c.execute("DELETE FROM exploits_attempted WHERE sl_no = %s", (sl_no,))
     c.execute("DELETE FROM vulnerabilities    WHERE sl_no = %s", (sl_no,))
     c.execute("DELETE FROM summary            WHERE sl_no = %s", (sl_no,))
-    try:
-        c.execute("DELETE FROM red_team_reports WHERE sl_no = %s", (sl_no,))
-    except Exception:
-        pass  # table may not exist on older installs
+    c.execute("DELETE FROM red_team_reports   WHERE sl_no = %s", (sl_no,))
     c.execute("DELETE FROM history            WHERE sl_no = %s", (sl_no,))
     conn.commit()
     conn.close()
