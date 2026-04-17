@@ -73,7 +73,11 @@ IMPORTANT RULES FOR ACCURACY:
 - curl timeouts and HTTP_CODE=000 mean the host is unreachable not exploitable
 - ab and stress tools are not Slowloris unless confirmed
 - Only assign CRITICAL if there is direct evidence of exploitability
-- If evidence is weak mark severity as LOW with note: unconfirmed"""
+- If evidence is weak mark severity as LOW with note: unconfirmed
+- Never invent Metasploit module paths. Only cite a module path you have verified via web_search; otherwise write "no Metasploit module verified" and recommend a standalone PoC by GitHub repo path
+- Never guess CVSS scores or vectors. If a CVSS value is not in your research output, write "CVSS: unknown -- requires NVD lookup"
+- Never attribute exploitation to specific named ransomware groups (e.g. BlackCat, Clop, LockBit) without a citation in the research data. Default attribution is "opportunistic scanners and commodity malware operators" unless evidence supports otherwise
+- Use the exact published vulnerability name from the original advisory (e.g. "regreSSHion" not "regresstty"). If unsure, write the CVE ID only"""
 
 def _thinking_prefix() -> str:
     """Return the thinking-mode prefix appropriate for the loaded model family.
@@ -105,14 +109,14 @@ def strip_thinking(text: str) -> str:
     return text.strip()
 
 
-def ask_llm(messages: list) -> str:
+def ask_llm(messages: list, temperature: float = 0.7) -> str:
     try:
         payload = {
             "model":       MODEL_NAME,
             "messages":    messages,
             "stream":      False,
             "max_tokens":  MAX_TOKENS,
-            "temperature": 0.7,
+            "temperature": temperature,
             "top_p":       0.9,
             "top_k":       10,
         }
@@ -170,7 +174,7 @@ def summarize_tool_output(raw_output: str) -> str:
         return raw_output
 
 
-def ask_llm_native(prompt: str, integrations: list | None = None) -> tuple:
+def ask_llm_native(prompt: str, integrations: list | None = None, temperature: float = 0.4) -> tuple:
     """
     Call the LM Studio native /api/v1/chat endpoint with optional MCP integrations.
     Returns (text_response: str, tool_calls: list).
@@ -184,7 +188,7 @@ def ask_llm_native(prompt: str, integrations: list | None = None) -> tuple:
         "input":          prompt,
         "stream":         False,
         "context_length": MAX_TOKENS,
-        "temperature":    0.4,
+        "temperature":    temperature,
         "top_p":          0.9,
     }
     if integrations:
@@ -259,30 +263,33 @@ Target: {target}
 Vulnerabilities requiring research:
 {vuln_summary}
 
-For each vulnerability, use web_search to find:
-1. Current CVE identifiers and CVSS score
-2. Whether public exploits or proof-of-concept code exist right now
-3. Whether actively exploited in the wild (ransomware groups, APTs, etc.)
-4. Current patch status and typical organizational deployment lag
+For each vulnerability, use web_search to find the items below. If web_search returns no usable result for a field, write the literal string "not verified" for that field -- do not fill it from training-data memory.
+
+1. Current CVE identifiers and CVSS 3.1 vector string (copy verbatim from NVD if found)
+2. Whether public exploits or proof-of-concept code exist right now (cite GitHub repo paths or Exploit-DB IDs you actually saw in search results)
+3. Whether actively exploited in the wild (cite the source advisory or threat-intel blog; do not name specific ransomware groups without a citation)
+4. Current patch status, fixed-in version, and typical organizational deployment lag
 
 After researching, summarize your findings using this format for each vulnerability:
-RESEARCH: <vuln_name>
-CVE: <CVE IDs or "none found">
-CVSS: <score and vector, or "unknown">
-EXPLOITS: <yes/no -- describe available PoCs and tools>
-IN_THE_WILD: <yes/no -- describe active exploitation campaigns>
-PATCH_STATUS: <patched/unpatched in typical deployments>
-NOTES: <threat intelligence context>
+RESEARCH: <vuln_name as published in original advisory>
+CVE: <CVE IDs or "not verified">
+CVSS: <full CVSS:3.1/... vector and base score, or "not verified">
+EXPLOITS: <yes with cited repo/Exploit-DB ID, or "not verified", or "no public exploit found">
+IN_THE_WILD: <yes with citation, or "not verified", or "no active exploitation reported">
+PATCH_STATUS: <fixed-in version with date, or "not verified">
+NOTES: <threat intelligence context, only facts you saw in search results>
+
+Reminder: "not verified" is a valid and preferred answer when search did not surface evidence. An honest "not verified" is more useful than a confident guess.
 """
 
     if not MCP_ENABLED:
-        text = ask_llm([{"role": "user", "content": prompt}])
+        text = ask_llm([{"role": "user", "content": prompt}], temperature=0.2)
         return {"research_text": text, "searches_performed": []}
 
-    text, tool_calls = ask_llm_native(prompt, _MCP_WEB_SEARCH)
+    text, tool_calls = ask_llm_native(prompt, _MCP_WEB_SEARCH, temperature=0.2)
     if _is_llm_error(text):
         print(f"[!] MCP research failed ({text}). Falling back to training-data knowledge.")
-        text = ask_llm([{"role": "user", "content": prompt}])
+        text = ask_llm([{"role": "user", "content": prompt}], temperature=0.2)
         tool_calls = []
 
     searches = [
@@ -291,6 +298,37 @@ NOTES: <threat intelligence context>
     ]
     print(f"[*] Research complete. {len(tool_calls)} web search(es) performed.")
     return {"research_text": text, "searches_performed": searches}
+
+
+def _lint_report(chains: str, dirs: str) -> list:
+    warnings = []
+    phase_order = ["recon", "initial access", "execution", "persistence",
+                   "discovery", "lateral movement", "collection", "exfiltration"]
+    seen_indices = []
+    for line in dirs.splitlines():
+        m = re.match(r"\s*PHASE:\s*(.+?)\s*$", line, re.IGNORECASE)
+        if m:
+            name = m.group(1).strip().lower()
+            if name in phase_order:
+                seen_indices.append(phase_order.index(name))
+    if seen_indices != sorted(seen_indices):
+        warnings.append("phase order in RED_TEAM_DIRECTIONS is not monotonic")
+    if re.search(r"<TARGET_IP>|<ATTACKER_PUBKEY>", dirs) and \
+       "REPLACE BEFORE EXECUTION" not in dirs.upper():
+        warnings.append("placeholders present without REPLACE BEFORE EXECUTION marker")
+    if "authorized_keys" in dirs:
+        if "mkdir -p" not in dirs or "chmod 600" not in dirs:
+            warnings.append("authorized_keys persistence missing mkdir -p / chmod hardening")
+    for chain_block in re.split(r"\n(?=CHAIN\s+\d+:)", chains):
+        like = re.search(r"LIKELIHOOD:\s*(HIGH|MEDIUM|LOW)", chain_block, re.IGNORECASE)
+        diff = re.search(r"DIFFICULTY:\s*(TRIVIAL|LOW|MEDIUM|HIGH)", chain_block, re.IGNORECASE)
+        if like and diff:
+            l, d = like.group(1).upper(), diff.group(1).upper()
+            if l == "HIGH" and d == "HIGH":
+                warnings.append("chain claims LIKELIHOOD:HIGH with DIFFICULTY:HIGH -- inconsistent")
+            if l == "LOW" and d in ("TRIVIAL", "LOW"):
+                warnings.append(f"chain claims LIKELIHOOD:LOW with DIFFICULTY:{d} -- inconsistent")
+    return warnings
 
 
 def generate_red_team_report(target: str, scan_result: dict, research: dict) -> dict:
@@ -365,6 +403,15 @@ EXPECTED_OUTPUT: <what successful execution looks like>
 DOCUMENT: <what the operator must record in engagement notes>
 MITRE: <ATT&CK technique ID>
 
+Internal consistency rules -- the report must satisfy these or it is wrong:
+- LIKELIHOOD and DIFFICULTY must be consistent with the exploitation cost described in research. A CVE requiring thousands of attempts over multiple hours cannot be LIKELIHOOD: HIGH or DIFFICULTY: LOW
+- Every command in RED_TEAM_DIRECTIONS must be operationally complete. SSH key persistence requires mkdir -p, chmod 700 on .ssh, chmod 600 on authorized_keys, and an explicit absolute path -- never bare "~/.ssh"
+- Phases in RED_TEAM_DIRECTIONS must appear in operational order: Recon -> Initial Access -> Execution -> Persistence -> Discovery -> Lateral Movement -> Collection -> Exfiltration. Skip phases that do not apply, but never reorder
+- Every PHASE block must include all five fields (PHASE, ACTION, EXPECTED_OUTPUT, DOCUMENT, MITRE). Missing any field invalidates the block
+- Tool names must be real and currently maintained. If you reference a Metasploit module, the path must come from the research data above. If no module was found in research, recommend the standalone PoC instead and say so explicitly
+- Placeholders like <TARGET_IP> must be flagged as "REPLACE BEFORE EXECUTION" -- do not pretend the operator knows what to substitute
+- If a chain depends on a configuration that scan data did not confirm (e.g. Nginx error_page reverse-proxy mode for CVE-2019-20372), state the precondition explicitly and mark the chain LIKELIHOOD: LOW until confirmed
+
 Plain text only. No markdown. No bold. No ## headers. Use exact section headers shown.
 Be operationally specific. Use real tool names and flags.
 """
@@ -372,12 +419,12 @@ Be operationally specific. Use real tool names and flags.
     research_ok = not _is_llm_error(research_text)
 
     if not MCP_ENABLED or not research_ok:
-        full_report = ask_llm([{"role": "user", "content": prompt}])
+        full_report = ask_llm([{"role": "user", "content": prompt}], temperature=0.2)
     else:
-        full_report, extra_calls = ask_llm_native(prompt, _MCP_WEB_SEARCH)
+        full_report, extra_calls = ask_llm_native(prompt, _MCP_WEB_SEARCH, temperature=0.2)
         if _is_llm_error(full_report):
             print(f"[!] MCP report generation failed. Falling back to training-data knowledge.")
-            full_report = ask_llm([{"role": "user", "content": prompt}])
+            full_report = ask_llm([{"role": "user", "content": prompt}], temperature=0.2)
         elif extra_calls:
             print(f"[*] Report generation used {len(extra_calls)} additional web search(es).")
 
@@ -388,10 +435,14 @@ Be operationally specific. Use real tool names and flags.
         )
         return m.group(1).strip() if m else ""
 
+    chains_text = _extract_section(full_report, "ATTACK_CHAINS")
+    dirs_text   = _extract_section(full_report, "RED_TEAM_DIRECTIONS")
+    for w in _lint_report(chains_text, dirs_text):
+        print(f"[!] report-lint: {w}")
     return {
         "research_data":       research_text,
-        "attack_chains":       _extract_section(full_report, "ATTACK_CHAINS"),
-        "red_team_directions": _extract_section(full_report, "RED_TEAM_DIRECTIONS"),
+        "attack_chains":       chains_text,
+        "red_team_directions": dirs_text,
     }
 
 
